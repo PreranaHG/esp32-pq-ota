@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "src/sign.c"
+        "src/packing.c"
+        "src/poly.c"
+        "src/poly_kl.c"
+        "src/polyvec.c"
+        "src/polyvec_lazy.c"
+        "src/ct.c"
+        "src/debug.c"
+        "src/fips202/fips202.c"
+        "src/fips202/fips202x4.c"
+        "src/fips202/keccakf1600.c"
+        "src/randombytes.c"
+    INCLUDE_DIRS
+        "include"
+        "src"
+    REQUIRES
+        esp_hw_support
+    PRIV_REQUIRES
+        bootloader_support
+)
+target_compile_definitions(${COMPONENT_LIB} PUBLIC MLD_CONFIG_PARAMETER_SET=44 MLD_CONFIG_NAMESPACE_PREFIX=mldsa44)

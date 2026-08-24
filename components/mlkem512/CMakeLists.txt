@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "src/kem.c"
+        "src/indcpa.c"
+        "src/poly.c"
+        "src/poly_k.c"
+        "src/compress.c"
+        "src/sampling.c"
+        "src/verify.c"
+        "src/debug.c"
+        "src/fips202/fips202.c"
+        "src/fips202/fips202x4.c"
+        "src/fips202/keccakf1600.c"
+        "src/randombytes.c"
+    INCLUDE_DIRS
+        "include"
+        "src"
+    REQUIRES
+        esp_hw_support
+    PRIV_REQUIRES
+        bootloader_support
+)
+target_compile_definitions(${COMPONENT_LIB} PUBLIC MLK_CONFIG_PARAMETER_SET=512 MLK_CONFIG_NAMESPACE_PREFIX=PQCP_MLKEM_NATIVE_MLKEM512)
