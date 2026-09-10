@@ -8,6 +8,7 @@
 #include "mldsa_native.h"
 #include "crypto_verify.h"
 #include "aes_gcm_demo.h"
+#include "mbedtls/sha256.h"
 
 static const char *TAG = "pqc_hybrid";
 
@@ -15,17 +16,21 @@ static const char *TAG = "pqc_hybrid";
 static void read_full_line(char *buf, size_t max_len)
 {
     size_t idx = 0;
-    while (idx < max_len - 1) {
+    while (idx < max_len - 1)
+    {
         int c = getchar();
-        if (c == EOF) {
+        if (c == EOF)
+        {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
 
         // Handle Enter key press (\n or \r)
-        if (c == '\n' || c == '\r') {
-            if (idx > 0) break; // Finished reading valid sentence input
-            continue;           // Ignore leading empty newlines
+        if (c == '\n' || c == '\r')
+        {
+            if (idx > 0)
+                break; // Finished reading valid sentence input
+            continue;  // Ignore leading empty newlines
         }
 
         // Echo typed character to monitor so you can see what you type
@@ -46,12 +51,17 @@ void aes_gcm_text_demo(void)
     uint8_t *kem_pk = pvPortMalloc(MLKEM_PUBLICKEYBYTES(512));
     uint8_t *kem_sk = pvPortMalloc(MLKEM_SECRETKEYBYTES(512));
 
-    if (!dsa_pk || !dsa_sk || !kem_pk || !kem_sk) {
+    if (!dsa_pk || !dsa_sk || !kem_pk || !kem_sk)
+    {
         ESP_LOGE(TAG, "Heap allocation failed for PQC keypairs!");
-        if (dsa_pk) vPortFree(dsa_pk);
-        if (dsa_sk) vPortFree(dsa_sk);
-        if (kem_pk) vPortFree(kem_pk);
-        if (kem_sk) vPortFree(kem_sk);
+        if (dsa_pk)
+            vPortFree(dsa_pk);
+        if (dsa_sk)
+            vPortFree(dsa_sk);
+        if (kem_pk)
+            vPortFree(kem_pk);
+        if (kem_sk)
+            vPortFree(kem_sk);
         return;
     }
 
@@ -63,15 +73,18 @@ void aes_gcm_text_demo(void)
 
     char input_buf[256];
 
-    while (1) {
+    while (1)
+    {
         printf("\n=======================================================\n");
         printf("Enter message to process with ML-KEM + AES-GCM + ML-DSA:\n> ");
         fflush(stdout);
 
         read_full_line(input_buf, sizeof(input_buf));
 
-        if (strlen(input_buf) == 0) continue;
-        if (strcmp(input_buf, "exit") == 0) {
+        if (strlen(input_buf) == 0)
+            continue;
+        if (strcmp(input_buf, "exit") == 0)
+        {
             ESP_LOGI(TAG, "Exiting PQC Demo.");
             break;
         }
@@ -81,9 +94,23 @@ void aes_gcm_text_demo(void)
 
         // --- STEP A: ML-KEM Key Exchange ---
         uint8_t ct_kem[MLKEM_CIPHERTEXTBYTES(512)];
-        uint8_t aes_key[MLKEM_BYTES]; 
-        PQCP_MLKEM_NATIVE_MLKEM512_enc(ct_kem, aes_key, kem_pk);
-        ESP_LOGI(TAG, "[ML-KEM-512] Encapsulated symmetric key generated");
+        uint8_t shared_secret[MLKEM_BYTES];
+        PQCP_MLKEM_NATIVE_MLKEM512_enc(ct_kem, shared_secret, kem_pk);
+        ESP_LOGI(TAG, "[ML-KEM-512] Encapsulated shared secret generated");
+
+        // --- STEP A.2: Derive AES-256 key via HKDF-SHA256 ---
+        uint8_t aes_key[CRYPTO_VERIFY_KEY_BYTES];
+        static const uint8_t hkdf_info[] = "esp32-pq-ota-aes-key-v1";
+        int hkdf_ret = crypto_verify_derive_aes_key(
+            shared_secret, sizeof(shared_secret),
+            hkdf_info, sizeof(hkdf_info) - 1,
+            aes_key);
+        if (hkdf_ret != 0) {
+            ESP_LOGE(TAG, "[HKDF] Key derivation failed!");
+            continue;
+        }
+        ESP_LOGI(TAG, "[HKDF] AES-256 key derived from shared secret");
+
 
         // --- STEP B: AES-GCM Encryption ---
         uint8_t iv[CRYPTO_VERIFY_IV_BYTES];
@@ -92,55 +119,69 @@ void aes_gcm_text_demo(void)
         uint8_t tag[CRYPTO_VERIFY_TAG_BYTES];
 
         int ret = crypto_verify_aes_gcm_encrypt(aes_key, iv, (const uint8_t *)input_buf, len, ciphertext, tag);
-        if (ret != 0) {
+        if (ret != 0)
+        {
             ESP_LOGE(TAG, "[AES-GCM] Encryption failed!");
             continue;
         }
 
         // Display Ciphertext in HEX format
         printf("I (%lu) %s: [AES-GCM] Ciphertext (HEX): ", (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS), TAG);
-        for (size_t i = 0; i < len; i++) {
+        for (size_t i = 0; i < len; i++)
+        {
             printf("%02x", ciphertext[i]);
         }
         printf("\n");
 
         // Display Auth Tag in HEX format
         printf("I (%lu) %s: [AES-GCM] Auth Tag   (HEX): ", (unsigned long)(xTaskGetTickCount() * portTICK_PERIOD_MS), TAG);
-        for (int i = 0; i < CRYPTO_VERIFY_TAG_BYTES; i++) {
+        for (int i = 0; i < CRYPTO_VERIFY_TAG_BYTES; i++)
+        {
             printf("%02x", tag[i]);
         }
         printf("\n");
 
-        // --- STEP C: ML-DSA Digital Signature ---
+        // --- STEP C: Hash the plaintext, sign the hash (not the ciphertext) ---
+        uint8_t plaintext_hash[32];
+        mbedtls_sha256((const uint8_t *)input_buf, len, plaintext_hash, 0);
+
         uint8_t sig[MLDSA44_BYTES];
-        mldsa44_signature(sig, ciphertext, len, NULL, 0, dsa_sk);
-        ESP_LOGI(TAG, "[ML-DSA-44] Digital signature generated for ciphertext");
+        mldsa44_signature(sig, plaintext_hash, sizeof(plaintext_hash), NULL, 0, dsa_sk);
+        ESP_LOGI(TAG, "[ML-DSA-44] Digital signature generated over plaintext hash");
 
-        // --- VERIFICATION & DECRYPTION FLOW ---
-        // 1. Verify Digital Signature
-        int sig_ok = mldsa44_verify(sig, ciphertext, len, NULL, 0, dsa_pk);
-        if (sig_ok == 0) {
-            ESP_LOGI(TAG, "[ML-DSA-44] Signature VERIFIED!");
-        } else {
-            ESP_LOGE(TAG, "[ML-DSA-44] Signature Verification FAILED!");
-            continue;
-        }
+                        // --- VERIFICATION & DECRYPTION FLOW (decrypt-then-verify) ---
+        // 1. Decapsulate KEM shared secret, re-derive the same AES key
+        uint8_t dec_shared_secret[MLKEM_BYTES];
+        PQCP_MLKEM_NATIVE_MLKEM512_dec(dec_shared_secret, ct_kem, kem_sk);
 
-        // 2. Decapsulate KEM Shared Secret Key
-        uint8_t dec_aes_key[MLKEM_BYTES];
-        PQCP_MLKEM_NATIVE_MLKEM512_dec(dec_aes_key, ct_kem, kem_sk);
+        uint8_t dec_aes_key[CRYPTO_VERIFY_KEY_BYTES];
+        crypto_verify_derive_aes_key(
+            dec_shared_secret, sizeof(dec_shared_secret),
+            hkdf_info, sizeof(hkdf_info) - 1,
+            dec_aes_key);
 
-        // 3. Decrypt AES-GCM Ciphertext
+        // 2. AES-GCM decrypt (auth tag checked here)
         uint8_t decrypted[256];
         memset(decrypted, 0, sizeof(decrypted));
         ret = crypto_verify_aes_gcm_decrypt(dec_aes_key, iv, ciphertext, len, tag, decrypted);
+
+        if (ret != 0) {
+            ESP_LOGE(TAG, "FAILURE: AES-GCM decryption/tag verification failed!");
+            continue;
+        }
         decrypted[len] = '\0';
 
-        if (ret == 0 && memcmp(input_buf, decrypted, len) == 0) {
+        // 3. Hash the decrypted plaintext, verify ML-DSA signature against it
+        uint8_t dec_hash[32];
+        mbedtls_sha256(decrypted, len, dec_hash, 0);
+
+        int sig_ok = mldsa44_verify(sig, dec_hash, sizeof(dec_hash), NULL, 0, dsa_pk);
+        if (sig_ok == 0) {
+            ESP_LOGI(TAG, "[ML-DSA-44] Signature VERIFIED over decrypted plaintext hash!");
             ESP_LOGI(TAG, "[AES-GCM] Decrypted Output : \"%s\"", decrypted);
-            ESP_LOGI(TAG, "SUCCESS: Complete PQC (KEM + AES + DSA) Pipeline Passed!");
+            ESP_LOGI(TAG, "SUCCESS: Complete PQC (KEM + HKDF + AES + DSA) Pipeline Passed!");
         } else {
-            ESP_LOGE(TAG, "FAILURE: AES-GCM Decryption or Tag verification failed!");
+            ESP_LOGE(TAG, "FAILURE: ML-DSA-44 signature verification failed!");
         }
     }
 
