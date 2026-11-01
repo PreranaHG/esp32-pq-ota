@@ -6,8 +6,12 @@
 #include "mldsa_native.h"
 #include "crypto_verify.h"
 #include "aes_gcm_demo.h"
+#include "pqc_keys.h"
+#include "ota_task.h"
 
 static const char *TAG = "pqc_ota";
+
+#if 0 // Disabled for the HTTP download test - re-enable once OTA works end-to-end
 
 static void mldsa_test_task(void *pvParameters)
 {
@@ -122,10 +126,17 @@ static void mlkem_keypair_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
+#endif // 0
+
 void app_main(void)
 {
-    ESP_LOGI(TAG, "esp32-pq-ota starting up");
+    ESP_LOGI(TAG, "*** Running UPDATED firmware v2 (via PQC OTA) ***");
 
+    // Generate/load the device's ML-KEM keypair and the vendor's ML-DSA
+    // public key. ota_task.c reads these via pqc_get_dsa_pk() / pqc_get_kem_sk().
+    pqc_keys_init();
+
+#if 0 // Disabled for the HTTP download test - re-enable once OTA works end-to-end
     BaseType_t task_result = xTaskCreate(mlkem_keypair_task, "mlkem_keypair", 32768, NULL, 5, NULL);
     if (task_result != pdPASS) {
         ESP_LOGE(TAG, "FAILED to create mlkem_keypair_task");
@@ -145,4 +156,8 @@ void app_main(void)
     if (task_result != pdPASS) {
         ESP_LOGE(TAG, "FAILED to create aes_gcm_demo_task");
     }
+#endif // 0
+
+    // Starts the Wi-Fi connect -> HTTP download -> decrypt -> verify -> flash task
+    ota_task_start();
 }
