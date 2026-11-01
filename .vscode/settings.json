@@ -22,12 +22,12 @@
   "idf.openOcdConfigs": [
     "board/esp32-wrover-kit-3.3v.cfg"
   ],
-  "idf.portWin": "COM3",
   "idf.currentSetup": "C:/Espressif/frameworks/esp-idf-v5.3.5/",
   "clangd.path": "E:\\espide\\Espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
     "--compile-commands-dir=e:\\surabhi_clg\\major_project\\OTA_project\\esp32-pq-ota-main\\esp32-pq-ota-main\\build"
-  ]
+  ],
+  "idf.port": "COM3"
 }
